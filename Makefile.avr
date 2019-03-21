@@ -1,0 +1,51 @@
+# Makefile
+#
+# main Makefile
+#
+# GOALS:
+# clean	- clean working dirs
+# hex	- Intel .hex for flash
+# srec	- Motorola .srec for flash
+# bin	- .bin for flash
+# lst	- listing
+# flash	- hex, srec, bin
+# all	- clean, lst, flash
+# elf   - .elf file
+# tag   - tags, cscope.out
+#
+
+
+.DEFAULT_GOAL	:= hex
+
+
+# MAKE_CRC_OF_FILE := yes
+# MAKE_HEAP_START_H := yes
+
+
+MCU_TARGET      := atxmega64a1
+DATA_START	:= 0x802160
+FIXED_REGS      := r2 r3 r15
+PRG             := prog-name
+
+
+OPTIMIZE        := -O2 -fomit-frame-pointer
+INCLUDE_DIRS    := . include
+
+CFLAGS += -g --std=gnu99
+
+#CFLAGS += --pedantic 
+
+example.c := --save-temps
+
+SRCDIR          := silOS
+include makef.mk
+
+SRCDIR          := .
+include makef.mk
+
+
+include rules.mk
+
+
+#
+# End of file  Makefile
