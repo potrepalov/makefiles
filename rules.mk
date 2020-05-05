@@ -180,9 +180,9 @@ CC_FLAGS        := -D$(MCU_TARGET)
 CC_FLAGS        += -nostartfiles -mthumb -march=armv7e-m
 CC_FLAGS        += -mfloat-abi=hard -mfpu=fpv4-sp-d16 -specs=nosys.specs
 
-CC              := arm-gcc $(CC_FLAGS)
-OBJCOPY         := arm-objcopy
-OBJDUMP         := arm-objdump
+CC              := arm-none-eabi-gcc $(CC_FLAGS)
+OBJCOPY         := arm-none-eabi-objcopy
+OBJDUMP         := arm-none-eabi-objdump
 
 
 # for ARM those vars are empty
@@ -478,7 +478,13 @@ endif
 
 skip-line = $(if $(findstring j,$(MAKEFLAGS)),,$(info ))
 
-ifeq ($(MAKE_VERSION),4.1)
+ifeq ($(MAKE_VERSION),4.2.1)
+slash:=\\\\
+define make-objs-list
+	$(file > $(PROGDIR)$(PRG)-objs-list)
+	$(foreach name,$(OBJS),$(file >> $(PROGDIR)$(PRG)-objs-list,$(name)))
+endef
+else ifeq ($(MAKE_VERSION),4.1)
 slash:=\\\\
 define make-objs-list
 	$(file > $(PROGDIR)$(PRG)-objs-list)
@@ -518,34 +524,58 @@ $(PROGDIR)$(PRG).elf : $(OBJS)
 	$(OBJCOPY) -O binary $< $@
 	$(call make-crc-of-bin)
 
+# proc-dep-file lang (compiled_file_name.o.d)
+# 1 (reformat list of source files)
+# 1.1 convert dos eol to unix eol
+# 1.2 convert last on line \ to #
+# 1.3 convert \ in filename to /
+# 1.4 restore to \ last on line #
+# 1.5 on the first line put target file name and dependence file name
+# 2.1 delete empty lines
+# 2.2 change the first line to 'SRC_FILES += \'
+#     (all source files will be in SRC_FILES list)
+# 2.3 add blank line after the last line
+# 3.1 delete empty lines
+# 3.2 delete first line
+# 3.3 delete initial spaces on lines
+# 3.4 change last on line \ to :
+#     (all source files need to exist in future build processes)
+# 3.5 add : on the last line and blank line after the last line
+# 4.1 delete emtpy lines
+# 4.2 add source files and makefiles
+define proc-dep-file
+ @$(SED) -e 's/\r//' -e 's/\\$$/#/' -e 'sa\\a/ag' -e 's/#$$/\\/' \
+         -e "1s/.*:/$(subst /,\/,$@) $(subst /,\/,$@.d): $(slash)\n/" \
+         < $@.d > $@.p.d
+ @$(SED) -e '/^[ \t]*\\*$$/d' -e '1s/.*:/SRC_FILES +=/' -e '$$s/$$/\n/' \
+         < $@.p.d > $@.d
+ @$(SED) -e '/^[ \t]*\\*$$/d' -e '1d' -e 's/^[ \t]*//' -e 's/\\$$/:/' \
+         -e '$$s/$$/ :\n/' \
+	 < $@.p.d >> $@.d
+ @$(SED) -e '/^[ \t]*\\*$$/d' \
+         -e "\$$s/$$/ $(slash)\n $(subst /,\/,$($(strip $(1))_MK_FILES_$<))/" \
+         < $@.p.d >> $@.d
+ @$(RM) $@.p.d
+endef
 
-# make_obj  lang
-define make_obj
- $(CC) -MMD -MF $@.p.d -c $($(strip $(1))_FLAGS)   \
+
+# make-obj  lang
+define make-obj
+ $(CC) -MMD -MF $@.d -c $($(strip $(1))_FLAGS)   \
        $($(strip $(1))_FLAGS_$<) $< -o $@
- @$(SED) -e "s/.*:/$(subst /,\/,$@): $(slash)\n/" < $@.p.d > $@.d
- @$(SED) -e '/^ \\$$/d' < $@.d > $@.p.d
- @$(SED) -e 's/.*:/SRC_FILES +=/g' < $@.p.d > $@.d
- @$(SED) -e "1s/^.*:/\n$(subst /,\/,$@) $(subst /,\/,$@).d : /"              \
-         -e "\$$s/$$/ $(slash)\n $(subst /,\/,$($(strip $(1))_MK_FILES_$<))\n/"  \
-         < $@.p.d >> $@.d
- @$(SED) -e '/^[^:]*: */d' -e 's/^[ \t]*//'   \
-         -e 's/ \\$$//' -e 's/$$/ :/'         \
-         -e "\$$s/$$/\n$(subst /,\/,$($(strip $(1))_MK_FILES_$<)) :/"  \
-         < $@.p.d >> $@.d
- -@$(RM) -f $@.p.d
+ $(call proc-dep-file,$(1))
  $(call skip-line)
 endef
 
 
 $(C_OBJS) : $(OBJDIR)%.o : %.c
-	$(call make_obj,C)
+	$(call make-obj,C)
 
 $(CPP_OBJS) : $(OBJDIR)%.o : %.cpp
-	$(call make_obj,CPP)
+	$(call make-obj,CPP)
 
 $(AS_OBJS) : $(OBJDIR)%.o : %.S
-	$(call make_obj,AS)
+	$(call make-obj,AS)
 
 
 
@@ -570,33 +600,30 @@ endif
 ifeq "tag" "$(findstring tag,$(subst tags,tag,$(MAKECMDGOALS)))"
 
 
-# make_dep  lang
-define make_dep
- $(CC) -MM $($(strip $(1))_FLAGS) $($(strip $(1))_FLAGS_$<) $< -o $@.p.d 
- @$(SED) -e 's/.*:/SRC_FILES +=/g' < $@.p.d > $@
- @$(SED) -e "1s/^.*:/\n$(subst /,\/,$(@:%.d=%)) $(subst /,\/,$@) : $(slash)\n/"  \
-         -e "\$$s/$$/ $(slash)\n $(subst /,\/,$($(strip $(1))_MK_FILES_$<))\n/"  \
-         < $@.p.d >> $@
- @$(SED) -e 's/^[^:]*: *//' -e 's/^[ \t]*//'   \
-         -e 's/ \\$$//' -e 's/$$/ :/'          \
-         -e "\$$s/$$/\n$(subst /,\/,$($(strip $(1))_MK_FILES_$<)) :/"  \
-         < $@.p.d >> $@.d
- -@$(RM) -f $@.p.d
+# make-dep  lang
+define make-dep
+ $(CC) -MM $($(strip $(1))_FLAGS) $($(strip $(1))_FLAGS_$<) $< -o $@.d 
+ $(call proc-dep-file,$(1))
  $(call skip-line)
 endef
 
 
 $(C_DEPS) : $(OBJDIR)%.o.d : %.c
-	$(call make_dep,C)
+	$(call make-dep,C)
 
 $(CPP_DEPS) : $(OBJDIR)%.o.d : %.cpp
-	$(call make_dep,CPP)
+	$(call make-dep,CPP)
 
 $(AS_DEPS) : $(OBJDIR)%.o.d : %.S
-	$(call make_dep,AS)
+	$(call make-dep,AS)
 
 
-ifeq ($(MAKE_VERSION),4.1)
+ifeq ($(MAKE_VERSION),4.2.1)
+define make-srcs-list
+	$(file > $(PROGDIR)$(PRG)-srcs-list)
+	$(foreach name,$(sort $(SRC_FILES)),$(file >> $(PROGDIR)$(PRG)-srcs-list,$(name)))
+endef
+else ifeq ($(MAKE_VERSION),4.1)
 define make-srcs-list
 	$(file > $(PROGDIR)$(PRG)-srcs-list)
 	$(foreach name,$(sort $(SRC_FILES)),$(file >> $(PROGDIR)$(PRG)-srcs-list,$(name)))
